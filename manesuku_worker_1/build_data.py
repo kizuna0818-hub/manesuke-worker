@@ -57,6 +57,7 @@ def dca_index(sc):
 # ---------- ② 個別株 一括（実アンカー→月次補間） ----------
 def lump_single(sc):
     amount = float(sc["amount"]); fx = fx_monthly(sc.get("fx_country", "Japan"))
+    if str(sc.get("market","")).lower() == "jp": fx = fx * 0 + 1.0   # 日本株: 円建て→為替換算しない
     anchors = {pd.Period(k, "M"): float(v) for k, v in sc["anchors"].items()}
     months = pd.period_range(min(anchors), max(anchors), freq="M")
     price = pd.Series(anchors).reindex(months).interpolate(method="linear")
@@ -77,6 +78,34 @@ def lump_single(sc):
     return {"yr": yr, "series": {"price": pr, "val": val}, "headline": head,
             "meta": {"type":"lump_single","asset":sc["asset"],"entryDate":sc["entryDate"]}, "popups": []}
 
+# ---------- ③ 個別資産 積立（実アンカー→月次補間・円建てDCA） ----------
+def dca_single(sc):
+    monthly = float(sc["monthly"]); fx = fx_monthly(sc.get("fx_country", "Japan"))
+    if str(sc.get("market","")).lower() == "jp": fx = fx * 0 + 1.0   # 日本株: 円建て→為替換算しない
+    anchors = {pd.Period(k, "M"): float(v) for k, v in sc["anchors"].items()}
+    a_months = pd.period_range(min(anchors), max(anchors), freq="M")
+    price = pd.Series(anchors).reindex(a_months).interpolate(method="linear")
+    start = pd.Period(sc["start"], "M"); end = pd.Period(sc.get("end", str(max(anchors))), "M")
+    if start < min(anchors): raise ValueError(f"needsReview: 開始月 {start} がデータ範囲より前")
+    months = pd.period_range(start, end, freq="M")
+    units = 0.0; contrib = 0.0; val=[]; con=[]; pr=[]; yr=[]
+    for m in months:
+        if m not in price.index: raise ValueError(f"needsReview: {m} の価格が無い")
+        f = float(fx[m]) if m in fx.index else float(fx.iloc[-1]); p = float(price[m])
+        units += (monthly / f) / p                 # 円→ドル→数量
+        contrib += monthly
+        val.append(round(units * p * f))           # 評価額(円)
+        con.append(round(contrib)); pr.append(round(p, 2)); yr.append(m.year)
+    final = val[-1]; trough_gap = min(v - c for v, c in zip(val, con))
+    head = {"invested": round(contrib), "final": final, "mult": round(final/contrib, 2),
+            "profit": round(final - contrib), "months": len(months),
+            "monthly": round(monthly), "entryP": round(float(price[start]), 2), "nowP": pr[-1],
+            "fxIn": round(float(fx[start]) if start in fx.index else float(fx.iloc[0]), 1),
+            "fxNow": round(float(fx.iloc[-1]), 1),
+            "underwater": bool(trough_gap < 0)}      # 一度でも累計投資額を割ったか
+    return {"yr": yr, "series": {"val": val, "contrib": con, "price": pr}, "headline": head,
+            "meta": {"type":"dca_single","asset":sc["asset"],"start":sc["start"],"monthly":monthly}, "popups": []}
+
 # ---------- 個別株の年次データ（VPSではrequestsで取得・ここは雛形） ----------
 def macrotrends_annual(ticker):
     """best-effort: 分割調整後の年次 高/安/終値。失敗時 None。
@@ -95,6 +124,7 @@ def macrotrends_annual(ticker):
 def build_data(sc):
     t = sc.get("type")
     if t == "dca_index":   return dca_index(sc)
+    if t == "dca_single":  return dca_single(sc)
     if t == "lump_single": return lump_single(sc)
     raise ValueError("unknown scenario type: %r" % t)
 
