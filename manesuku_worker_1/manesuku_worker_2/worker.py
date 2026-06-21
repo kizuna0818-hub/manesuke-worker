@@ -41,12 +41,13 @@ def health():
 class ResearchReq(BaseModel):
     asset: str
     entryDate: str
+    market: str = "us"
 
 @app.post("/research")
 def research_ep(req: ResearchReq):
     """②a: 個別株の分割調整後アンカー＋出来事＋出典（Claude＋web検索）。"""
     try:
-        return {"research": research.research_single_stock(req.asset, req.entryDate)}
+        return {"research": research.research_single_stock(req.asset, req.entryDate, market=req.market)}
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))   # needsReview → 止める
     except Exception as e:
