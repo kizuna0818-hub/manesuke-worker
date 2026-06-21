@@ -57,6 +57,7 @@ def dca_index(sc):
 # ---------- ② 個別株 一括（実アンカー→月次補間） ----------
 def lump_single(sc):
     amount = float(sc["amount"]); fx = fx_monthly(sc.get("fx_country", "Japan"))
+    if str(sc.get("market","")).lower() == "jp": fx = fx * 0 + 1.0   # 日本株: 円建て→為替換算しない
     anchors = {pd.Period(k, "M"): float(v) for k, v in sc["anchors"].items()}
     months = pd.period_range(min(anchors), max(anchors), freq="M")
     price = pd.Series(anchors).reindex(months).interpolate(method="linear")
@@ -80,6 +81,7 @@ def lump_single(sc):
 # ---------- ③ 個別資産 積立（実アンカー→月次補間・円建てDCA） ----------
 def dca_single(sc):
     monthly = float(sc["monthly"]); fx = fx_monthly(sc.get("fx_country", "Japan"))
+    if str(sc.get("market","")).lower() == "jp": fx = fx * 0 + 1.0   # 日本株: 円建て→為替換算しない
     anchors = {pd.Period(k, "M"): float(v) for k, v in sc["anchors"].items()}
     a_months = pd.period_range(min(anchors), max(anchors), freq="M")
     price = pd.Series(anchors).reindex(a_months).interpolate(method="linear")
