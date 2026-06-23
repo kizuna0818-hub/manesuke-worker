@@ -31,7 +31,8 @@ class ScenarioReq(BaseModel):
 
 class ProduceReq(BaseModel):
     spec: dict
-    introUrl: Optional[str] = None   # カバー/ポスターを頭に付ける場合
+    introUrl: Optional[str] = None   # 指定時は自分のバナーURLを優先
+    cover: Optional[dict] = None     # 指定時は表紙を自動生成して頭に付ける
     fps: int = 30
 
 @app.get("/health")
@@ -63,16 +64,21 @@ def build_data_ep(req: ScenarioReq):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-def _produce(job_id, spec, intro_url, fps):
+def _produce(job_id, spec, intro_url, fps, cover=None):
     try:
         html = build_reel.build(spec)
         hpath = os.path.join(OUT, f"{job_id}.html"); open(hpath, "w").write(html)
         reel = os.path.join(OUT, f"{job_id}_reel.mp4")
         render_reel.render_html_to_mp4(hpath, reel, fps=fps)
         final = os.path.join(OUT, f"{job_id}.mp4")
-        if intro_url:
+        intro_img = None
+        if intro_url:                                   # 自分のバナーURL優先
             intro_img = os.path.join(OUT, f"{job_id}_intro.png")
             urllib.request.urlretrieve(intro_url, intro_img)
+        elif cover:                                     # 表紙を自動生成
+            intro_img = os.path.join(OUT, f"{job_id}_cover.png")
+            build_cover.make_cover(cover, intro_img)
+        if intro_img:
             intro_clip = os.path.join(OUT, f"{job_id}_intro.mp4")
             render_reel.image_to_clip(intro_img, intro_clip, dur=3.5, fps=fps)
             render_reel.concat_mp4s([intro_clip, reel], final, fps=fps)
@@ -87,21 +93,20 @@ def produce(req: ProduceReq):
     """spec -> 完成MP4（非同期）。jobIdを返すのでポーリング。"""
     job_id = uuid.uuid4().hex[:12]
     JOBS[job_id] = {"status": "processing"}
-    threading.Thread(target=_produce, args=(job_id, req.spec, req.introUrl, req.fps), daemon=True).start()
+    threading.Thread(target=_produce, args=(job_id, req.spec, req.introUrl, req.fps, req.cover), daemon=True).start()
     return {"jobId": job_id, "status": "processing"}
 
 class CoverReq(BaseModel):
     coverSpec: dict
-    bgPrompt: Optional[str] = None
     width: int = 1080
-    height: int = 1350
+    height: int = 1920
 
 @app.post("/cover")
 def cover_ep(req: CoverReq):
-    """カバー生成: AI背景(fal.ai/FAL_KEY) ＋ 実数HTMLオーバーレイ → PNG"""
+    """表紙(タイトルカード)PNGを生成して返す（単体テスト用）"""
     name = uuid.uuid4().hex[:12] + ".png"
     out = os.path.join(OUT, name)
-    build_cover.make_cover(req.coverSpec, out, bg_prompt=req.bgPrompt, size=(req.width, req.height))
+    build_cover.make_cover(req.coverSpec, out, size=(req.width, req.height))
     return {"cover": f"/file/{name}"}
 
 @app.get("/job/{job_id}")
