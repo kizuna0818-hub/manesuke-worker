@@ -92,8 +92,15 @@ def _synth_sfx(sfx_dir):
     _sfx_write(os.path.join(sfx_dir, "rise.wav"), sig)
     open(done, "w").write("ok"); return sfx_dir
 
+def tts(text, out_path, voice="ja-JP-NanamiNeural"):
+    """edge-tts(無料・MS)でテキストを日本語音声(mp3)に。失敗時は例外。"""
+    subprocess.run(["edge-tts", "--voice", voice, "--text", text, "--write-media", out_path],
+                   check=True, capture_output=True, timeout=40)
+    return out_path
+
 def add_sfx(video_in, video_out, events, sfx_dir="/tmp/sfx", fps=30):
-    """events=[(t_sec, name, vol), ...] を無音トラックに重ねて動画に焼く。"""
+    """events=[(t_sec, name_or_path, vol), ...] を無音トラックに重ねて動画に焼く。
+    name_or_path が実在ファイルならそれを、なければ sfx_dir/name.wav を使う。"""
     if not events:
         shutil.copy(video_in, video_out); return video_out
     _synth_sfx(sfx_dir)
@@ -102,7 +109,8 @@ def add_sfx(video_in, video_out, events, sfx_dir="/tmp/sfx", fps=30):
     inp = ["-i", video_in, "-f", "lavfi", "-t", f"{dur:.3f}", "-i", "anullsrc=r=44100:cl=stereo"]
     filt = []; labels = ["[1]"]
     for k, (t, name, vol) in enumerate(events):
-        inp += ["-i", os.path.join(sfx_dir, name + ".wav")]
+        src = name if os.path.exists(name) else os.path.join(sfx_dir, name + ".wav")
+        inp += ["-i", src]
         ms = max(0, int(t * 1000))
         filt.append(f"[{2+k}]adelay={ms}|{ms},volume={vol}[e{k}]"); labels.append(f"[e{k}]")
     filt.append("".join(labels) + f"amix=inputs={len(events)+1}:duration=first:normalize=0[mix]")
