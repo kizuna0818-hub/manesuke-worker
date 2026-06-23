@@ -12,7 +12,7 @@ n8n から叩く。scenario→実データ、spec→完成MP4。
 
 ローカル起動:  uvicorn worker:app --host 0.0.0.0 --port 8080
 """
-import os, uuid, threading, traceback, urllib.request
+import os, uuid, threading, traceback, urllib.request, subprocess
 from typing import Optional
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
@@ -90,21 +90,34 @@ def _produce(job_id, spec, intro_url, fps, cover=None):
         reel = os.path.join(OUT, f"{job_id}_reel.mp4")
         render_reel.render_html_to_mp4(hpath, reel, fps=fps)
         silent = os.path.join(OUT, f"{job_id}_silent.mp4")
-        intro_img = None
-        if intro_url:                                   # 自分のバナーURL優先
+        intro_img = None; narr = None; cover_dur = 3.5
+        if intro_url:                                   # 自分のバナーURL優先(読み上げなし)
             intro_img = os.path.join(OUT, f"{job_id}_intro.png")
             urllib.request.urlretrieve(intro_url, intro_img)
-        elif cover:                                     # 表紙を自動生成
+        elif cover:                                     # 表紙を自動生成 ＋ タイトル読み上げ
             intro_img = os.path.join(OUT, f"{job_id}_cover.png")
             build_cover.make_cover(cover, intro_img)
+            try:                                        # TTS失敗時はスキップして続行
+                text = f"もし{cover.get('title','')}を{cover.get('investLabel','')}{cover.get('verb','')}"
+                narr = os.path.join(OUT, f"{job_id}_narr.mp3")
+                render_reel.tts(text, narr)
+                nd = float(subprocess.run(["ffprobe", "-v", "error", "-show_entries",
+                    "format=duration", "-of", "default=nw=1:nk=1", narr],
+                    capture_output=True, text=True).stdout.strip() or 0)
+                cover_dur = max(3.5, nd + 0.8)          # 読み上げが終わるまで表紙を表示
+            except Exception:
+                narr = None
         if intro_img:
             intro_clip = os.path.join(OUT, f"{job_id}_intro.mp4")
-            render_reel.image_to_clip(intro_img, intro_clip, dur=3.5, fps=fps)
+            render_reel.image_to_clip(intro_img, intro_clip, dur=cover_dur, fps=fps)
             render_reel.concat_mp4s([intro_clip, reel], silent, fps=fps)
+            offset = cover_dur
         else:
-            os.replace(reel, silent)
+            os.replace(reel, silent); offset = 0.0
         final = os.path.join(OUT, f"{job_id}.mp4")
-        events = _sfx_events(spec, 3.5 if intro_img else 0.0, bool(intro_img))
+        events = _sfx_events(spec, offset, bool(intro_img))
+        if narr:
+            events.append((0.35, narr, 1.0))           # 表紙の上にナレーション
         render_reel.add_sfx(silent, final, events, sfx_dir=os.path.join(OUT, "sfx"), fps=fps)
         JOBS[job_id] = {"status": "done", "mp4": f"/file/{job_id}.mp4"}
     except Exception as e:
