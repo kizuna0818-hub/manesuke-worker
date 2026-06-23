@@ -64,13 +64,32 @@ def build_data_ep(req: ScenarioReq):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+def _sfx_events(spec, offset, has_intro):
+    """ビート構成から上品・控えめな効果音イベントを作る。"""
+    ev = []
+    if has_intro:
+        ev.append((0.15, "chime", 0.5))          # 表紙で軽いチャイム
+    t = float(offset)
+    for b in spec.get("beats", []):
+        typ = b.get("type"); d = float(b.get("dur", 3))
+        if typ == "setup":
+            ev.append((t + 0.1, "rise", 0.32))
+        elif typ == "chart":
+            ev.append((t + 0.15, "whoosh", 0.38)) # 描画開始
+        elif typ == "bars":
+            ev.append((t + 0.2, "ding", 0.5))      # 数字・棒グラフ
+        elif typ == "cta":
+            ev.append((t + 0.1, "chime", 0.4))
+        t += d                                     # lesson/highlight は鳴らさない
+    return ev
+
 def _produce(job_id, spec, intro_url, fps, cover=None):
     try:
         html = build_reel.build(spec)
         hpath = os.path.join(OUT, f"{job_id}.html"); open(hpath, "w").write(html)
         reel = os.path.join(OUT, f"{job_id}_reel.mp4")
         render_reel.render_html_to_mp4(hpath, reel, fps=fps)
-        final = os.path.join(OUT, f"{job_id}.mp4")
+        silent = os.path.join(OUT, f"{job_id}_silent.mp4")
         intro_img = None
         if intro_url:                                   # 自分のバナーURL優先
             intro_img = os.path.join(OUT, f"{job_id}_intro.png")
@@ -81,9 +100,12 @@ def _produce(job_id, spec, intro_url, fps, cover=None):
         if intro_img:
             intro_clip = os.path.join(OUT, f"{job_id}_intro.mp4")
             render_reel.image_to_clip(intro_img, intro_clip, dur=3.5, fps=fps)
-            render_reel.concat_mp4s([intro_clip, reel], final, fps=fps)
+            render_reel.concat_mp4s([intro_clip, reel], silent, fps=fps)
         else:
-            os.replace(reel, final)
+            os.replace(reel, silent)
+        final = os.path.join(OUT, f"{job_id}.mp4")
+        events = _sfx_events(spec, 3.5 if intro_img else 0.0, bool(intro_img))
+        render_reel.add_sfx(silent, final, events, sfx_dir=os.path.join(OUT, "sfx"), fps=fps)
         JOBS[job_id] = {"status": "done", "mp4": f"/file/{job_id}.mp4"}
     except Exception as e:
         JOBS[job_id] = {"status": "error", "error": str(e), "trace": traceback.format_exc()[-1000:]}
