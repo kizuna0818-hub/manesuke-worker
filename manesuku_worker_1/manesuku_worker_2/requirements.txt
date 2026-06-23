@@ -2,5 +2,7 @@ fastapi
 uvicorn[standard]
 playwright
 pandas
+numpy
 requests
 pillow
+edge-tts
